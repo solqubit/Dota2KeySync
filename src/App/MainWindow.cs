@@ -347,7 +347,7 @@ namespace Dota2KeySync.App
             else if (blocked)
             {
                 SetStatus(Theme.Amber, string.Join(" y ", blockers) + (blockers.Count > 1 ? " están abiertos" : " está abierto") +
-                    ": ciérralo para poder copiar o eliminar (Steam Cloud podría devolver las teclas antiguas).");
+                    ": ciérralo para poder copiar, importar o eliminar (Steam Cloud podría devolver las teclas antiguas).");
             }
             else if (accounts.Any(a => a.RememberedUnknown))
             {
@@ -499,6 +499,19 @@ namespace Dota2KeySync.App
             actions.Children.Add(originBtn);
             actions.Children.Add(targetBtn);
 
+            var exportBtn = IconAction(Theme.IconExport, Theme.Text, a.HasDotaKeys,
+                a.HasDotaKeys ? "Exportar teclas a un .zip" : "Esta cuenta no tiene teclas para exportar", "Exportar teclas de " + a.DisplayName);
+            exportBtn.Margin = new Thickness(10, 0, 0, 0);
+            exportBtn.Click += (s, e) => DoExport(a);
+            actions.Children.Add(exportBtn);
+
+            var importBtn = IconAction(Theme.IconImport, Theme.Text, blockers.Count == 0,
+                blockers.Count == 0 ? "Importar teclas desde un .zip a esta cuenta" : "Cierra " + string.Join(" y ", blockers) + " para poder importar",
+                "Importar teclas a " + a.DisplayName);
+            importBtn.Margin = new Thickness(6, 0, 0, 0);
+            importBtn.Click += (s, e) => DoImport(a);
+            actions.Children.Add(importBtn);
+
             if (!a.Remembered && !a.RememberedUnknown)
             {
                 var del = new Button
@@ -524,6 +537,23 @@ namespace Dota2KeySync.App
 
             card.Child = grid;
             return card;
+        }
+
+        Button IconAction(string glyph, Color c, bool enabled, string tip, string name)
+        {
+            var b = new Button
+            {
+                Style = (Style)Application.Current.Resources["Btn"],
+                Background = Theme.Brush(Theme.Surface2),
+                Foreground = Theme.Brush(c),
+                Padding = new Thickness(11, 8, 11, 8),
+                Content = new TextBlock { Text = glyph, FontFamily = Theme.Icons, FontSize = 14 },
+                IsEnabled = enabled,
+                ToolTip = tip,
+            };
+            ToolTipService.SetShowOnDisabled(b, true);
+            System.Windows.Automation.AutomationProperties.SetName(b, name);
+            return b;
         }
 
         Button RoleButton(string text, Color c, bool active)
@@ -660,9 +690,118 @@ namespace Dota2KeySync.App
 
         bool Confirm(string title, string message, string ok, bool danger)
         {
+            bool unused;
+            return Confirm(title, message, ok, danger, null, out unused);
+        }
+
+        bool Confirm(string title, string message, string ok, bool danger, string checkText, out bool isChecked)
+        {
             dimmer.Visibility = Visibility.Visible;
-            try { return ConfirmDialog.Ask(this, title, message, ok, danger); }
+            try { return ConfirmDialog.Ask(this, title, message, ok, danger, checkText, out isChecked); }
             finally { dimmer.Visibility = Visibility.Collapsed; }
+        }
+
+        /// <summary>Remembers a folder for the next dialog, unless it is inside Steam.</summary>
+        void RememberFolder(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return;
+            if (steamPath != null)
+            {
+                string root = System.IO.Path.GetFullPath(steamPath).TrimEnd('\\') + "\\";
+                if ((System.IO.Path.GetFullPath(dir).TrimEnd('\\') + "\\").StartsWith(root, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            Settings.LastFolder = dir;
+        }
+
+        bool ExportWithDialog(SteamAccount a)
+        {
+            bool cancelled;
+            return ExportWithDialog(a, out cancelled);
+        }
+
+        /// <summary>Asks where to save and exports the account's keys. Returns false if cancelled or failed.</summary>
+        bool ExportWithDialog(SteamAccount a, out bool cancelled)
+        {
+            cancelled = false;
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Exportar teclas de " + a.DisplayName,
+                Filter = "Teclas de Dota 2 (*.zip)|*.zip",
+                DefaultExt = ".zip",
+                AddExtension = true,
+                OverwritePrompt = true,
+                // Full path so Windows opens the folder we remember, not its own last-visited one.
+                FileName = System.IO.Path.Combine(Settings.LastFolder, KeyArchive.SuggestedFileName(a, DateTime.Now)),
+                InitialDirectory = Settings.LastFolder,
+            };
+            if (dlg.ShowDialog(this) != true) { cancelled = true; return false; }
+            try
+            {
+                KeyArchive.Export(a, dlg.FileName);
+                RememberFolder(System.IO.Path.GetDirectoryName(dlg.FileName));
+                Flash("Teclas de " + a.DisplayName + " exportadas a " + dlg.FileName, Theme.Green, 10);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Flash("No se pudo exportar: " + ex.Message, Theme.Accent);
+                return false;
+            }
+        }
+
+        void DoExport(SteamAccount a)
+        {
+            ExportWithDialog(a);
+        }
+
+        void DoImport(SteamAccount a)
+        {
+            if (!EnsureClosed()) return;
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Importar teclas a " + a.DisplayName,
+                Filter = "Teclas de Dota 2 (*.zip;*.lst)|*.zip;*.lst|Todos los archivos (*.*)|*.*",
+                InitialDirectory = Settings.LastFolder,
+                CheckFileExists = true,
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            RememberFolder(System.IO.Path.GetDirectoryName(dlg.FileName));
+
+            KeyPackage pkg;
+            try { pkg = KeyArchive.Load(dlg.FileName); }
+            catch (Exception ex)
+            {
+                Flash("No se pudo leer el archivo: " + ex.Message, Theme.Accent);
+                return;
+            }
+
+            string source = pkg.SourceName != null
+                ? "Las teclas de " + pkg.SourceName + (string.IsNullOrEmpty(pkg.Date) ? "" : " (" + pkg.Date + ")")
+                : "Las teclas del archivo";
+            string msg = source + " reemplazarán por completo las de " + a.DisplayName + ".\n\nArchivo: " +
+                         System.IO.Path.GetFileName(pkg.FilePath);
+            bool exportFirst;
+            if (!Confirm("Importar teclas", msg, "Importar y reemplazar", false,
+                    a.HasDotaKeys ? "Exportar antes las teclas actuales de " + a.DisplayName : null, out exportFirst)) return;
+            bool exportCancelled;
+            if (exportFirst && !ExportWithDialog(a, out exportCancelled))
+            {
+                // On failure ExportWithDialog already shows the reason; only explain a plain cancel.
+                if (exportCancelled) Flash("Importación cancelada: no se exportaron las teclas actuales.", Theme.Amber);
+                return;
+            }
+            if (!EnsureClosed()) return; // Steam/Dota may have started meanwhile
+            try
+            {
+                KeyArchive.Apply(pkg, a);
+                Reload();
+                Flash("Teclas importadas a " + a.DisplayName + ". Si Steam avisa de un conflicto de Steam Cloud, elige los archivos de este PC.",
+                      Theme.Green, 15);
+            }
+            catch (Exception ex)
+            {
+                Flash("No se pudo importar: " + ex.Message, Theme.Accent);
+            }
         }
 
         void DoCopy()
@@ -671,8 +810,15 @@ namespace Dota2KeySync.App
             var from = origin;
             var to = target;
             string msg = "Las teclas de " + from.DisplayName + " reemplazarán por completo las de " + to.DisplayName + ".";
-            msg += to.HasDotaKeys ? " Las teclas actuales de " + to.DisplayName + " se perderán." : "";
-            if (!Confirm("Copiar teclas", msg, "Copiar y reemplazar", false)) return;
+            bool exportFirst;
+            if (!Confirm("Copiar teclas", msg, "Copiar y reemplazar", false,
+                    to.HasDotaKeys ? "Exportar antes las teclas actuales de " + to.DisplayName : null, out exportFirst)) return;
+            bool exportCancelled;
+            if (exportFirst && !ExportWithDialog(to, out exportCancelled))
+            {
+                if (exportCancelled) Flash("Copia cancelada: no se exportaron las teclas actuales.", Theme.Amber);
+                return;
+            }
             if (!EnsureClosed()) return; // Steam/Dota may have started while the dialog was open
             try
             {

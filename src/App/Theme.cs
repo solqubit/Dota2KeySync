@@ -30,6 +30,8 @@ namespace Dota2KeySync.App
         public const string IconArrow    = "";
         public const string IconCheck    = "";
         public const string IconWarning  = "";
+        public const string IconExport   = "";
+        public const string IconImport   = "";
 
         public static Color Hex(string hex)
         {
@@ -145,6 +147,36 @@ namespace Dota2KeySync.App
             <Trigger Property='IsMouseOver' Value='True'>
               <Setter TargetName='bd' Property='Background' Value='#E5452F'/>
               <Setter Property='Foreground' Value='White'/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType='CheckBox'>
+    <Setter Property='Foreground' Value='#ECEEF3'/>
+    <Setter Property='Cursor' Value='Hand'/>
+    <Setter Property='FocusVisualStyle' Value='{x:Null}'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='CheckBox'>
+          <StackPanel Orientation='Horizontal' Background='Transparent'>
+            <Border x:Name='box' Width='18' Height='18' CornerRadius='5' BorderThickness='1.5'
+                    BorderBrush='#4A5060' Background='Transparent' VerticalAlignment='Center'>
+              <TextBlock x:Name='mark' Text='&#xE73E;' FontFamily='Segoe Fluent Icons, Segoe MDL2 Assets' FontSize='11'
+                         Foreground='White' HorizontalAlignment='Center' VerticalAlignment='Center' Visibility='Collapsed'/>
+            </Border>
+            <ContentPresenter Margin='10,0,0,0' VerticalAlignment='Center'/>
+          </StackPanel>
+          <ControlTemplate.Triggers>
+            <Trigger Property='IsMouseOver' Value='True'>
+              <Setter TargetName='box' Property='BorderBrush' Value='#33B6C8'/>
+            </Trigger>
+            <Trigger Property='IsChecked' Value='True'>
+              <Setter TargetName='box' Property='Background' Value='#33B6C8'/>
+              <Setter TargetName='box' Property='BorderBrush' Value='#33B6C8'/>
+              <Setter TargetName='mark' Property='Visibility' Value='Visible'/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>

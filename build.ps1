@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Force $bin | Out-Null
 
 $core = Get-ChildItem (Join-Path $root 'src\Core') -Filter *.cs | ForEach-Object FullName
 $app  = Get-ChildItem (Join-Path $root 'src\App')  -Filter *.cs | ForEach-Object FullName
-$common = @('/nologo', '/optimize+', '/langversion:5', '/r:System.Core.dll')
+$common = @('/nologo', '/optimize+', '/langversion:5', '/r:System.Core.dll', '/r:System.IO.Compression.dll')
 
 function Invoke-Csc([string[]]$csArgs) {
     & $csc @csArgs

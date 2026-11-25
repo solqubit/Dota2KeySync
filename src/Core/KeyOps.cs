@@ -16,13 +16,36 @@ namespace Dota2KeySync.Core
                 throw new InvalidOperationException("El origen y el destino son la misma cuenta.");
             if (!File.Exists(from.KeysPath))
                 throw new InvalidOperationException(from.DisplayName + " no tiene teclas de Dota 2 guardadas.");
+            WriteKeys(to, File.ReadAllBytes(from.KeysPath));
+        }
+
+        /// <summary>Overwrites an account's keybind file with the given bytes (total replacement).</summary>
+        internal static void WriteKeys(SteamAccount to, byte[] data)
+        {
             if (!Directory.Exists(to.FolderPath))
                 throw new InvalidOperationException("La carpeta de " + to.DisplayName + " ya no existe. Pulsa actualizar.");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(to.KeysPath));
-            if (File.Exists(to.KeysPath))
-                File.SetAttributes(to.KeysPath, FileAttributes.Normal);
-            File.Copy(from.KeysPath, to.KeysPath, true);
+            string dir = Path.GetDirectoryName(to.KeysPath);
+            Directory.CreateDirectory(dir);
+            // Write next to the target, then swap in one step so a failure never leaves a half-written file.
+            string tmp = Path.Combine(dir, AccountScanner.KeysFileName + "." + Guid.NewGuid().ToString("N") + ".tmp");
+            try
+            {
+                File.WriteAllBytes(tmp, data);
+                if (File.Exists(to.KeysPath))
+                {
+                    File.SetAttributes(to.KeysPath, FileAttributes.Normal);
+                    File.Replace(tmp, to.KeysPath, null);
+                }
+                else
+                {
+                    File.Move(tmp, to.KeysPath);
+                }
+            }
+            finally
+            {
+                if (File.Exists(tmp)) File.Delete(tmp);
+            }
 
             // Writable for Dota, and newer than the cloud copy so Steam Cloud uploads it.
             File.SetAttributes(to.KeysPath, FileAttributes.Normal);

@@ -11,8 +11,9 @@ namespace Dota2KeySync.App
     public class ConfirmDialog : Window
     {
         bool confirmed;
+        CheckBox check;
 
-        ConfirmDialog(Window owner, string title, string message, string confirmText, bool danger)
+        ConfirmDialog(Window owner, string title, string message, string confirmText, bool danger, string checkText)
         {
             Owner = owner;
             WindowStyle = WindowStyle.None;
@@ -68,6 +69,17 @@ namespace Dota2KeySync.App
                 Foreground = Theme.Brush(Theme.Muted), Margin = new Thickness(0, 0, 0, 22),
             });
 
+            if (!string.IsNullOrEmpty(checkText))
+            {
+                check = new CheckBox
+                {
+                    Content = new TextBlock { Text = checkText, FontSize = 13, TextWrapping = TextWrapping.Wrap },
+                    IsChecked = false,
+                    Margin = new Thickness(0, -8, 0, 22),
+                };
+                stack.Children.Add(check);
+            }
+
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var cancel = new Button { Content = "Cancelar", Style = (Style)Application.Current.Resources["GhostBtn"], IsCancel = true };
             cancel.Click += (s, e) => Close();
@@ -95,8 +107,17 @@ namespace Dota2KeySync.App
 
         public static bool Ask(Window owner, string title, string message, string confirmText, bool danger)
         {
-            var dlg = new ConfirmDialog(owner, title, message, confirmText, danger);
+            bool unused;
+            return Ask(owner, title, message, confirmText, danger, null, out unused);
+        }
+
+        /// <summary>Shows the dialog; when checkText is given, an unchecked checkbox is added and its state returned.</summary>
+        public static bool Ask(Window owner, string title, string message, string confirmText, bool danger,
+                               string checkText, out bool isChecked)
+        {
+            var dlg = new ConfirmDialog(owner, title, message, confirmText, danger, checkText);
             dlg.ShowDialog();
+            isChecked = dlg.confirmed && dlg.check != null && dlg.check.IsChecked == true;
             return dlg.confirmed;
         }
     }
