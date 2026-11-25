@@ -53,6 +53,7 @@ namespace Dota2KeySync.Tests
             Run("Export_RefusesInsideSteam", Export_RefusesInsideSteam);
             Run("Load_DetectsZipWithoutExtension", Load_DetectsZipWithoutExtension);
             Run("Load_RejectsNonKeysFiles", Load_RejectsNonKeysFiles);
+            Run("ShutdownSteam_RejectsMissingExe", ShutdownSteam_RejectsMissingExe);
             Console.WriteLine(fails == 0 ? "ALL PASSED (" + checks + " checks)" : fails + " FAILED");
             return fails;
         }
@@ -496,6 +497,14 @@ namespace Dota2KeySync.Tests
             var list = AccountScanner.Scan(root);
             Directory.Delete(dst, true);
             Check(Throws(() => KeyArchive.Apply(KeyArchive.Load(lst), list[0])) && !Directory.Exists(dst), "missing target rejected");
+            Directory.Delete(root, true);
+        }
+
+        static void ShutdownSteam_RejectsMissingExe()
+        {
+            string root = NewSteam(); // fake Steam folder has no steam.exe
+            Check(Throws(() => KeyOps.ShutdownSteam(root)), "missing steam.exe rejected");
+            Check(Throws(() => KeyOps.ShutdownSteam(null)), "null path rejected");
             Directory.Delete(root, true);
         }
 

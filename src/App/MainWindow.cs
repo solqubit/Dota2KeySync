@@ -30,6 +30,10 @@ namespace Dota2KeySync.App
         readonly Ellipse statusDot = new Ellipse { Width = 8, Height = 8 };
         readonly TextBlock statusText = new TextBlock();
         readonly Border dimmer = new Border();
+        readonly Button closeSteamButton = new Button();
+        bool closingSteam;
+        DateTime closingSince;
+        Action pendingAction;
 
         string flashMessage;
         Color flashColor;
@@ -286,14 +290,54 @@ namespace Dota2KeySync.App
 
         UIElement BuildStatusBar()
         {
-            var panel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(28, 0, 24, 16) };
+            var grid = new Grid { Margin = new Thickness(28, 0, 24, 14), MinHeight = 32 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
             statusDot.VerticalAlignment = VerticalAlignment.Center;
+            grid.Children.Add(statusDot);
+
             statusText.FontSize = 12;
-            statusText.Margin = new Thickness(9, 0, 0, 0);
+            statusText.Margin = new Thickness(9, 0, 12, 0);
             statusText.VerticalAlignment = VerticalAlignment.Center;
-            panel.Children.Add(statusDot);
-            panel.Children.Add(statusText);
-            return panel;
+            statusText.TextWrapping = TextWrapping.Wrap;
+            Grid.SetColumn(statusText, 1);
+            grid.Children.Add(statusText);
+
+            closeSteamButton.Style = (Style)Application.Current.Resources["GhostBtn"];
+            closeSteamButton.BorderBrush = Theme.Brush(Theme.Amber, 0.5);
+            closeSteamButton.Foreground = Theme.Brush(Theme.Amber);
+            closeSteamButton.Padding = new Thickness(12, 5, 12, 6);
+            closeSteamButton.FontSize = 12;
+            closeSteamButton.Content = "Cerrar Steam";
+            closeSteamButton.ToolTip = "Cierra Steam como si usaras Salir en su icono junto al reloj";
+            closeSteamButton.Visibility = Visibility.Collapsed;
+            closeSteamButton.Click += (s, e) => CloseSteam(null);
+            Grid.SetColumn(closeSteamButton, 2);
+            grid.Children.Add(closeSteamButton);
+            return grid;
+        }
+
+        // ------------------------------------------------------------------ steam shutdown
+
+        /// <summary>Asks Steam to exit; when it is gone, runs <paramref name="then"/> (the action the user wanted).</summary>
+        void CloseSteam(Action then)
+        {
+            try
+            {
+                KeyOps.ShutdownSteam(steamPath);
+                closingSteam = true;
+                closingSince = DateTime.Now;
+                pendingAction = then;
+                Flash("Cerrando Steam…", Theme.Amber, 60);
+            }
+            catch (Exception ex)
+            {
+                closingSteam = false;
+                pendingAction = null;
+                Flash(ex.Message, Theme.Accent, 10);
+            }
         }
 
         // ------------------------------------------------------------------ data
@@ -322,6 +366,21 @@ namespace Dota2KeySync.App
             blockers = now;
             if (justClosed) Reload();          // Steam may have changed who is remembered
             else if (changed) RenderCards(false);
+
+            if (closingSteam && !blockers.Contains("Steam"))
+            {
+                closingSteam = false;
+                var next = pendingAction;
+                pendingAction = null;
+                Flash("Steam cerrado. Ya puedes copiar, importar o eliminar.", Theme.Green, 6);
+                if (next != null && blockers.Count == 0) Dispatcher.BeginInvoke(next);
+            }
+            else if (closingSteam && (DateTime.Now - closingSince).TotalSeconds > 45)
+            {
+                closingSteam = false;
+                pendingAction = null;
+                Flash("Steam no se cerró. Ciérralo desde su icono junto al reloj (clic derecho → Salir).", Theme.Accent, 12);
+            }
             UpdateState();
         }
 
@@ -329,8 +388,10 @@ namespace Dota2KeySync.App
         {
             bool blocked = blockers.Count > 0;
             bool ready = origin != null && target != null && origin.AccountId != target.AccountId;
-            copyButton.IsEnabled = ready && !blocked;
-            if (blocked) copyButton.ToolTip = "Cierra " + string.Join(" y ", blockers) + " antes de copiar";
+            copyButton.IsEnabled = ready;   // when blocked, clicking explains and offers to close Steam
+            closeSteamButton.Visibility = blockers.Contains("Steam") && !blockers.Contains("Dota 2") && !closingSteam
+                ? Visibility.Visible : Visibility.Collapsed;
+            if (blocked && ready) copyButton.ToolTip = string.Join(" y ", blockers) + " está abierto: al pulsar te explico cómo seguir";
             else if (!ready) copyButton.ToolTip = "Elige una cuenta de origen y una de destino";
             else copyButton.ToolTip = "Reemplaza las teclas de " + target.DisplayName + " por las de " + origin.DisplayName;
 
@@ -347,7 +408,7 @@ namespace Dota2KeySync.App
             else if (blocked)
             {
                 SetStatus(Theme.Amber, string.Join(" y ", blockers) + (blockers.Count > 1 ? " están abiertos" : " está abierto") +
-                    ": ciérralo para poder copiar, importar o eliminar (Steam Cloud podría devolver las teclas antiguas).");
+                    ": hay que cerrarlo para copiar, importar o eliminar teclas.");
             }
             else if (accounts.Any(a => a.RememberedUnknown))
             {
@@ -505,8 +566,9 @@ namespace Dota2KeySync.App
             exportBtn.Click += (s, e) => DoExport(a);
             actions.Children.Add(exportBtn);
 
-            var importBtn = IconAction(Theme.IconImport, Theme.Text, blockers.Count == 0,
-                blockers.Count == 0 ? "Importar teclas desde un .zip a esta cuenta" : "Cierra " + string.Join(" y ", blockers) + " para poder importar",
+            var importBtn = IconAction(Theme.IconImport, Theme.Text, true,
+                blockers.Count == 0 ? "Importar teclas desde un .zip a esta cuenta"
+                                    : "Importar teclas (" + string.Join(" y ", blockers) + " está abierto: al pulsar te explico cómo seguir)",
                 "Importar teclas a " + a.DisplayName);
             importBtn.Margin = new Thickness(6, 0, 0, 0);
             importBtn.Click += (s, e) => DoImport(a);
@@ -522,10 +584,9 @@ namespace Dota2KeySync.App
                     Padding = new Thickness(11, 8, 11, 8),
                     Margin = new Thickness(10, 0, 0, 0),
                     Content = new TextBlock { Text = Theme.IconDelete, FontFamily = Theme.Icons, FontSize = 14 },
-                    IsEnabled = blockers.Count == 0,
                     ToolTip = blockers.Count == 0
                         ? "Eliminar la carpeta de esta cuenta olvidada"
-                        : "Cierra " + string.Join(" y ", blockers) + " para poder eliminar",
+                        : "Eliminar (" + string.Join(" y ", blockers) + " está abierto: al pulsar te explico cómo seguir)",
                 };
                 ToolTipService.SetShowOnDisabled(del, true);
                 System.Windows.Automation.AutomationProperties.SetName(del, "Eliminar " + a.DisplayName);
@@ -679,12 +740,44 @@ namespace Dota2KeySync.App
 
         // ------------------------------------------------------------------ actions
 
+        /// <summary>Re-check right before writing; no dialog, just a message.</summary>
         bool EnsureClosed()
+        {
+            return EnsureClosed(null);
+        }
+
+        /// <summary>
+        /// True when Steam and Dota 2 are closed. Otherwise explains why and, if only Steam is open,
+        /// offers to close it and then run <paramref name="retry"/> automatically.
+        /// </summary>
+        bool EnsureClosed(Action retry)
         {
             blockers = KeyOps.RunningBlockers();
             if (blockers.Count == 0) return true;
-            Flash("Cierra " + string.Join(" y ", blockers) + " antes de continuar.", Theme.Amber);
             RenderCards(false);
+
+            if (blockers.Contains("Dota 2"))
+            {
+                Flash("Dota 2 está abierto: ciérralo antes de cambiar teclas.", Theme.Amber, 8);
+                return false;
+            }
+            if (closingSteam)
+            {
+                Flash("Esperando a que Steam se cierre…", Theme.Amber, 8);
+                return false;
+            }
+            if (retry == null)
+            {
+                Flash("Steam está abierto: ciérralo antes de continuar.", Theme.Amber, 8);
+                return false;
+            }
+            if (Confirm("Steam está abierto",
+                    "Para cambiar teclas hay que cerrar Steam; si sigue abierto, Steam Cloud podría devolver las teclas antiguas.\n\n" +
+                    "¿Lo cierro ahora? Cuando termine de cerrarse, sigo yo solo.",
+                    "Cerrar Steam y seguir", false))
+            {
+                CloseSteam(retry);
+            }
             return false;
         }
 
@@ -756,7 +849,7 @@ namespace Dota2KeySync.App
 
         void DoImport(SteamAccount a)
         {
-            if (!EnsureClosed()) return;
+            if (!EnsureClosed(() => DoImport(a))) return;
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
                 Title = "Importar teclas a " + a.DisplayName,
@@ -806,7 +899,7 @@ namespace Dota2KeySync.App
 
         void DoCopy()
         {
-            if (origin == null || target == null || !EnsureClosed()) return;
+            if (origin == null || target == null || !EnsureClosed(DoCopy)) return;
             var from = origin;
             var to = target;
             string msg = "Las teclas de " + from.DisplayName + " reemplazarán por completo las de " + to.DisplayName + ".";
@@ -836,7 +929,7 @@ namespace Dota2KeySync.App
 
         void DoDelete(SteamAccount a)
         {
-            if (!EnsureClosed()) return;
+            if (!EnsureClosed(() => DoDelete(a))) return;
             string msg = "Se eliminará toda la carpeta de " + a.DisplayName + " (ID " + a.AccountId + "): teclas, ajustes y datos locales " +
                          "de todos sus juegos y capturas.\n\n" + a.FolderPath + "\n\nEsto no se puede deshacer.";
             if (!Confirm("Eliminar cuenta olvidada", msg, "Eliminar para siempre", true)) return;

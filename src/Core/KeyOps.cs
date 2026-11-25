@@ -102,6 +102,15 @@ namespace Dota2KeySync.Core
             dir.Delete(false);
         }
 
+        /// <summary>Asks the running Steam to exit cleanly (same as "Salir" in its tray menu). Never force-kills.</summary>
+        public static void ShutdownSteam(string steamPath)
+        {
+            string exe = string.IsNullOrEmpty(steamPath) ? null : Path.Combine(steamPath, "steam.exe");
+            if (exe == null || !File.Exists(exe))
+                throw new InvalidOperationException("No se encontró steam.exe. Ciérralo desde su icono junto al reloj.");
+            using (Process.Start(new ProcessStartInfo(exe, "-shutdown") { UseShellExecute = false, WorkingDirectory = steamPath })) { }
+        }
+
         /// <summary>Names of running programs that must be closed before touching files.</summary>
         public static List<string> RunningBlockers()
         {
